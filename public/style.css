@@ -276,3 +276,134 @@ tr.current-row td { background: #24304a; }
 }
 .modal-box .modal-detail .chip { margin-top: 3px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* 演出复盘（/replay.html，只读） */
+.replay-layout { display: grid; gap: 20px; }
+.replay-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: #9aa3b8; }
+.replay-meta b { color: #c3c9d8; font-weight: 600; }
+.replay-warn {
+  display: none;
+  background: #4a3a1e;
+  color: #f0c169;
+  border: 1px solid #7a5f2e;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.7;
+}
+.replay-warn.show { display: block; }
+.replay-warn .badline {
+  display: block;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  background: #14161c;
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin: 3px 0;
+  word-break: break-all;
+}
+.replay-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.replay-filters select { width: auto; flex: 0 1 240px; }
+.replay-filters label { font-size: 13px; color: #8b93a8; }
+
+/* 可拖动时间轴 */
+.timeline-wrap { padding: 6px 4px 2px; }
+.timeline {
+  position: relative;
+  height: 64px;
+  background: #14161c;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  overflow: hidden;
+}
+.timeline .cue-band {
+  position: absolute;
+  top: 6px;
+  bottom: 22px;
+  border-left: 1px solid #3a4052;
+  border-right: 1px solid #3a4052;
+  background: rgba(47, 111, 237, 0.10);
+  font-size: 11px;
+  color: #8ab4ff;
+  padding: 3px 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.timeline .cue-band.even { background: rgba(139, 180, 255, 0.07); }
+.timeline .marker {
+  position: absolute;
+  bottom: 6px;
+  width: 4px;
+  height: 9px;
+  border-radius: 2px;
+  transform: translateX(-2px);
+}
+.timeline .playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #f0c169;
+  pointer-events: none;
+}
+.timeline .playhead::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -5px;
+  border: 6px solid transparent;
+  border-top-color: #f0c169;
+}
+.timeline-scale { display: flex; justify-content: space-between; font-size: 11px; color: #5d6478; margin-top: 4px; }
+
+.transport { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.transport .time-readout {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 14px;
+  color: #c3c9d8;
+  flex: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+.speed-btn[aria-pressed="true"] { background: #2f6fed; color: #fff; }
+.speed-btn { background: #333948; }
+
+.replay-state-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .replay-state-grid { grid-template-columns: 1fr; } }
+.replay-chips-line { margin-top: 8px; line-height: 2; }
+.replay-event-list {
+  max-height: 360px;
+  overflow-y: auto;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  background: #14161c;
+  border-radius: 6px;
+  padding: 8px;
+}
+.replay-event-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: #5d6478;
+  cursor: pointer;
+}
+.replay-event-row:hover { background: #20242f; }
+.replay-event-row.applied { color: #c3c9d8; }
+.replay-event-row.applied .replay-event-name { color: #8ab4ff; }
+.replay-event-row.is-warn.applied { color: #f0c169; }
+.replay-event-row.is-warn.applied .replay-event-name { color: #f0c169; }
+.replay-event-row .replay-event-t { color: inherit; opacity: 0.7; flex: 0 0 78px; }
+.replay-event-name { flex: 0 0 128px; }
+.replay-event-detail { word-break: break-all; }
+.replay-cue-sub { font-size: 12px; color: #9aa3b8; text-decoration: line-through; }
+.replay-phase-idle { color: #8b93a8; }
+.replay-phase-active { color: #8ab4ff; }
+.replay-phase-done { color: #8fe3a5; }
+.replay-kbd { font-size: 12px; color: #5d6478; }
+.bad-warn-chip { background: #4a3a1e; color: #f0c169; }
+

@@ -6,6 +6,7 @@ const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
+const replay = require('./replay'); // 演出复盘（只读）模块：只读 data 目录事件日志，不触碰当前演出状态
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -169,6 +170,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+
+// ---------------------------------------------------------------------------
+// 演出复盘（只读）HTTP 接口：仅供 /replay.html 调用。
+// 只读 data 目录中已闭合（session-start → sequence-finished）的历史场次，
+// 绝不写入当前演出状态或事件日志；fileId 强制 UUID 形状，杜绝路径穿越。
+// ---------------------------------------------------------------------------
+app.get('/api/replay/sessions', (req, res) => {
+  res.json(replay.listSessions(DATA_DIR));
+});
+
+app.get('/api/replay/sessions/:fileId/:runId', (req, res) => {
+  const result = replay.getSession(DATA_DIR, req.params.fileId, req.params.runId);
+  if (result.error === 'badId') return res.status(400).json({ error: '场次 ID 不合法' });
+  if (result.error === 'notFound') return res.status(404).json({ error: '场次不存在或尚未结束' });
+  if (result.error) return res.status(500).json({ error: '读取事件日志失败' });
+  res.json(result);
+});
 
 const onlinePositions = new Set(); // 当前在线的岗位名
 
@@ -977,6 +995,7 @@ server.listen(PORT, () => {
   console.log(`  导演端:   http://localhost:${PORT}/director.html`);
   console.log(`  控制端:   http://localhost:${PORT}/control.html`);
   console.log(`  岗位端:   http://localhost:${PORT}/position.html`);
+  console.log(`  演出复盘: http://localhost:${PORT}/replay.html （只读，回放已结束场次）`);
   console.log(`  指挥权租约: ${LEASE_TTL_MS / 1000} 秒（心跳续期，超时/断线自动释放）`);
   console.log(`  事件日志: data/events-${state.sessionId}.jsonl`);
 });

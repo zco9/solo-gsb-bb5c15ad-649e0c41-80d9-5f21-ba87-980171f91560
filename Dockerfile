@@ -6,6 +6,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
 COPY server.js ./
+COPY replay.js ./
 COPY public ./public
 
 ENV PORT=3000
