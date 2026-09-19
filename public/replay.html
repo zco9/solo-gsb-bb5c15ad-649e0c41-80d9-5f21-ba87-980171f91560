@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>演出复盘 · 口令时间轴</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🎞 演出复盘 · 已结束场次口令时间轴</h1>
+    <nav>
+      <a href="index.html">首页</a>
+      <a href="director.html">导演端</a>
+      <a href="control.html">控制端</a>
+      <a href="position.html">岗位端</a>
+    </nav>
+  </header>
+  <main>
+    <div class="card">
+      <h2>只读模式说明</h2>
+      <div class="muted" style="line-height:1.7">
+        复盘仅读取 <code>data/</code> 中已结束场次（出现 <code>sequence-finished</code>）的 JSONL 事件日志，
+        <b>不会写入当前演出状态或事件日志</b>。可拖动时间轴任意跳转；跳转后从起点确定性重放到目标时刻，
+        当前口令、确认/超时、替岗、修订与暂停状态与顺序播放完全一致。
+      </div>
+    </div>
+
+    <div id="warnings" class="replay-warn"></div>
+
+    <!-- 场次列表 -->
+    <div id="listView">
+      <div class="card">
+        <h2>已结束场次</h2>
+        <div id="runList"><span class="muted">加载中…</span></div>
+      </div>
+    </div>
+
+    <!-- 单场复盘 -->
+    <div id="detailView" style="display:none">
+      <div class="card">
+        <div class="row" style="margin-bottom:14px">
+          <button class="secondary narrow" id="backBtn">← 返回场次列表</button>
+          <div id="runMeta" class="replay-meta"></div>
+        </div>
+
+        <div class="replay-filters">
+          <div class="fgroup">
+            <span class="muted">事件类型</span>
+            <select id="typeFilter">
+              <option value="">全部类型</option>
+            </select>
+          </div>
+          <div class="fgroup">
+            <span class="muted">岗位</span>
+            <select id="positionFilter">
+              <option value="">全部岗位</option>
+            </select>
+          </div>
+          <div class="fgroup seg speed" id="speedSeg">
+            <button data-speed="1" class="on">1×</button>
+            <button data-speed="2">2×</button>
+            <button data-speed="4">4×</button>
+          </div>
+        </div>
+
+        <div class="replay-controls">
+          <button id="playBtn" class="narrow">▶ 播放</button>
+          <button id="restartBtn" class="secondary narrow">⇤ 回到开始</button>
+          <span class="time-readout"><span id="curTime">--:--:--</span> / <span id="endTime">--:--:--</span>
+            （<span id="curOffset">0.0s</span>）</span>
+        </div>
+
+        <div class="timeline" id="timeline" title="拖动 / 点击任意位置跳转">
+          <div class="tl-axis" id="tlAxis"></div>
+          <div id="tlCues"></div>
+          <div id="tlPauseZones"></div>
+          <div id="tlMarkers"></div>
+          <div class="tl-playhead" id="tlPlayhead"></div>
+        </div>
+        <div class="replay-legend" id="tlLegend"></div>
+
+        <div class="replay-eventlist log-box" id="eventList"></div>
+      </div>
+
+      <div class="card">
+        <h2>当前时刻状态（确定性重放）</h2>
+        <div id="replayState"><span class="muted">—</span></div>
+      </div>
+    </div>
+  </main>
+  <div class="tl-tip" id="tlTip"></div>
+  <script src="replay-engine.js"></script>
+  <script src="replay.js"></script>
+</body>
+</html>

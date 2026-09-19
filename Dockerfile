@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
-COPY server.js ./
+COPY server.js replay-store.js ./
 COPY public ./public
 
 ENV PORT=3000

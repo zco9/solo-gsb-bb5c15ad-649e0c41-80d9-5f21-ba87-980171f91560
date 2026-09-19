@@ -6,6 +6,7 @@ const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
+const replayStore = require('./replay-store');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -166,6 +167,22 @@ function publicState() {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------------------------------------------------------------------------
+// 演出复盘接口（只读）：仅读取 data 目录事件日志，绝不写入当前演出状态或日志
+// ---------------------------------------------------------------------------
+// GET /api/replay/runs          —— 全部已结束场次列表（逐行解析跳过损坏记录并告警）
+// GET /api/replay/runs/:runId   —— 单场事件（runId = <sessionId>-r<场次序号>）
+app.get('/api/replay/runs', (req, res) => {
+  const { runs, warnings } = replayStore.listFinishedRuns(DATA_DIR);
+  res.json({ runs, warnings });
+});
+
+app.get('/api/replay/runs/:runId', (req, res) => {
+  const data = replayStore.loadFinishedRun(DATA_DIR, req.params.runId);
+  if (!data) return res.status(404).json({ error: '未找到该已结束场次（场次不存在或未正常结束）' });
+  res.json(data);
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -977,6 +994,7 @@ server.listen(PORT, () => {
   console.log(`  导演端:   http://localhost:${PORT}/director.html`);
   console.log(`  控制端:   http://localhost:${PORT}/control.html`);
   console.log(`  岗位端:   http://localhost:${PORT}/position.html`);
+  console.log(`  演出复盘: http://localhost:${PORT}/replay.html`);
   console.log(`  指挥权租约: ${LEASE_TTL_MS / 1000} 秒（心跳续期，超时/断线自动释放）`);
   console.log(`  事件日志: data/events-${state.sessionId}.jsonl`);
 });

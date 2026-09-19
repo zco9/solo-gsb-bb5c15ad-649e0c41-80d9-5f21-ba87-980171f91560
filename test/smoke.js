@@ -1,6 +1,12 @@
 // 端到端冒烟测试：模拟导演、控制端、三个岗位端走完整流程（含临时替岗）
 'use strict';
 const WebSocket = require('ws');
+const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const E = require('../public/replay-engine.js');
 
 const URL = 'ws://localhost:3000/ws';
 let passed = 0, failed = 0;
@@ -82,9 +88,9 @@ function stopHeartbeat(c) {
     st0.lease.remainingMs > 0 && st0.lease.ttlMs > 0 && !st0.lease.token);
   startHeartbeat(control);
 
-  console.log('0.1 重置场次，确保干净起点');
-  control.send({ type: 'reset' });
-  await control.waitState((s) => s.phase === 'idle');
+  console.log('0.1 重置场次，确保干净起点（可能残留上轮草稿：明确沿用当前序列并放弃草稿）');
+  control.send({ type: 'reset', resetMode: 'keep' });
+  await control.waitState((s) => s.phase === 'idle' && s.draft === null);
 
   console.log('1. 导演创建序列（3 条口令）');
   director.send({ type: 'setSequence', timeoutSec: 3, cues: [
@@ -718,6 +724,158 @@ function stopHeartbeat(c) {
   dirY.send({ type: 'saveDraft', revision: 1, cues: [{ text: 'Y 刷新后覆盖', targets: ['音响'] }] });
   st = await dirY.waitState((s) => s.draft && s.draft.revision === 2);
   check('后来者刷新后重做成功', st.draft.cues[0].text === 'Y 刷新后覆盖');
+
+  // -------------------------------------------------------------------------
+  // 51. 演出复盘：只读接口（列表/单场）、损坏记录跳过、确定性重放
+  // -------------------------------------------------------------------------
+  console.log('51. 演出复盘：只读接口与确定性重放');
+  const httpGet = (urlPath) => new Promise((resolve, reject) => {
+    http.get(`http://localhost:3000${urlPath}`, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => resolve({ status: res.statusCode, body: body ? JSON.parse(body) : null }));
+    }).on('error', reject);
+  });
+  const dataDir = path.join(__dirname, '..', 'data');
+  const FIX_SID = crypto.randomUUID();
+  const FIX2_SID = crypto.randomUUID();
+  const fixture = `${dataDir}/events-${FIX_SID}.jsonl`;
+  const fixture2 = `${dataDir}/events-${FIX2_SID}.jsonl`;
+  const L = (ts, event, detail) => JSON.stringify({ ts, event, detail }) + '\n';
+  try {
+    // fixture：一场已结束（含替岗/超时/迟到/修订/暂停/重复确认），
+    // 之后重置开第二场但未完成（不得出现在复盘列表）；中间穿插 3 行损坏记录。
+    fs.writeFileSync(fixture,
+      L('2031-01-01T00:00:00.000Z', 'sequence-set', {
+        count: 2, timeoutSec: 10,
+        cues: [
+          { seq: 1, text: '原版口令', targets: ['灯光', '音响'] },
+          { seq: 2, text: '收场口令', targets: ['灯光'] },
+        ],
+      }) +
+      L('2031-01-01T00:00:01.000Z', 'session-start', {}) +
+      L('2031-01-01T00:00:01.100Z', 'cue-started',
+        { seq: 1, text: '原版口令', targets: ['灯光', '音响'], revision: 1, attemptId: 'a1' }) +
+      '{损坏行：不是合法 JSON\n' +
+      L('2031-01-01T00:00:02.000Z', 'position-substituted',
+        { seq: 1, revision: 1, attemptId: 'a1', from: '音响', to: '道具' }) +
+      L('2031-01-01T00:00:03.000Z', 'confirm', { seq: 1, revision: 1, attemptId: 'a1', position: '道具' }) +
+      L('2031-01-01T00:00:04.000Z', 'cue-paused',
+        { seq: 1, revision: 1, attemptId: 'a1', reason: '设备调试', remainingSec: 8 }) +
+      '{"ts":"2031-01-01T00:00:04.500Z"}\n' + // 损坏行：缺 event
+      L('2031-01-01T00:00:20.000Z', 'cue-resumed',
+        { seq: 1, revision: 1, attemptId: 'a1', remainingSec: 8 }) +
+      L('2031-01-01T00:00:21.000Z', 'cue-recalled',
+        { seq: 1, oldRevision: 1, newRevision: 2, oldAttemptId: 'a1', reason: '措辞更正', newText: '修订版口令' }) +
+      L('2031-01-01T00:00:21.000Z', 'cue-resent',
+        { seq: 1, text: '修订版口令', reason: '措辞更正', revision: 2, attemptId: 'a2' }) +
+      // 替岗仅对旧轮次有效：新轮次重新替岗，道具的确认才计入（与实时规则一致）
+      L('2031-01-01T00:00:21.500Z', 'position-substituted',
+        { seq: 1, revision: 2, attemptId: 'a2', from: '音响', to: '道具' }) +
+      L('2031-01-01T00:00:22.000Z', 'confirm', { seq: 1, revision: 2, attemptId: 'a2', position: '道具' }) +
+      L('2031-01-01T00:00:31.100Z', 'cue-timeout',
+        { seq: 1, revision: 2, attemptId: 'a2', missing: ['灯光'] }) +
+      L('2031-01-01T00:00:32.000Z', 'confirm-late', { seq: 1, revision: 2, attemptId: 'a2', position: '灯光' }) +
+      L('2031-01-01T00:00:32.500Z', 'cue-completed', { seq: 1, revision: 2, attemptId: 'a2' }) +
+      L('2031-01-01T00:00:32.500Z', 'cue-started',
+        { seq: 2, text: '收场口令', targets: ['灯光'], revision: 1, attemptId: 'a3' }) +
+      L('2031-01-01T00:00:33.000Z', 'confirm', { seq: 2, revision: 1, attemptId: 'a3', position: '灯光' }) +
+      L('2031-01-01T00:00:33.100Z', 'confirm-duplicate', { seq: 2, revision: 1, attemptId: 'a3', position: '灯光' }) +
+      L('2031-01-01T00:00:33.200Z', 'cue-completed', { seq: 2, revision: 1, attemptId: 'a3' }) +
+      L('2031-01-01T00:00:33.200Z', 'sequence-finished', {}) +
+      'not-json-at-tail\n' + // 损坏行
+      L('2031-01-01T00:00:40.000Z', 'session-reset', { choice: 'normal' }) +
+      L('2031-01-01T00:00:41.000Z', 'session-start', {}) +
+      L('2031-01-01T00:00:41.100Z', 'cue-started',
+        { seq: 1, text: '未完成场', targets: ['灯光'], revision: 1, attemptId: 'x1' }) +
+      L('2031-01-01T00:00:42.000Z', 'session-reset', { choice: 'normal' })); // 中断场
+    // fixture2：空文件/从未开始的文件，不应产生场次
+    fs.writeFileSync(fixture2, L('2031-01-01T00:05:00.000Z', 'position-online', { position: '灯光' }));
+
+    const listRes = await httpGet('/api/replay/runs');
+    check('场次列表接口 200', listRes.status === 200);
+    const fixRuns = listRes.body.runs.filter((r) => r.sessionId === FIX_SID);
+    check('仅已结束场列入表（中断场被排除）', fixRuns.length === 1 && fixRuns[0].runIndex === 1);
+    check('空转文件不产生场次', !listRes.body.runs.some((r) => r.sessionId === FIX2_SID));
+    const sum = fixRuns[0];
+    check('列表统计：口令 2 / 确认 4 / 超时 1 / 暂停 1 / 修订 1 / 替岗 2',
+      sum.cueCount === 2 && sum.confirmCount === 4 && sum.timeoutCount === 1 &&
+      sum.pausedCount === 1 && sum.recallCount === 1 && sum.substitutionCount === 2);
+    check('列表返回该文件损坏行告警', sum.warningCount === 3 &&
+      listRes.body.warnings.some((w) => w.sessionId === FIX_SID && w.count === 3));
+
+    const detailRes = await httpGet(`/api/replay/runs/${FIX_SID}-r1`);
+    check('单场接口 200 且事件窗口不含 session-start/重置后的事件',
+      detailRes.status === 200 &&
+      detailRes.body.events[0].event === 'cue-started' &&
+      detailRes.body.events[detailRes.body.events.length - 1].event === 'sequence-finished' &&
+      !detailRes.body.events.some((e) => ['session-start', 'session-reset'].includes(e.event)));
+    check('单场接口返回逐行解析告警（3 行损坏被跳过、其余照常）',
+      detailRes.body.warnings.length === 3 &&
+      detailRes.body.warnings.every((w) => typeof w.line === 'number' && w.reason));
+
+    const nf = await httpGet(`/api/replay/runs/${FIX_SID}-r2`);
+    check('未结束场返回 404', nf.status === 404);
+    const bad = await httpGet('/api/replay/runs/not-a-valid-id');
+    check('非法 runId 返回 404', bad.status === 404);
+
+    // 确定性重放：引擎直接消费单场接口事件
+    const events = detailRes.body.events;
+    const RO = { timeoutSec: detailRes.body.run.timeoutSec };
+    check('接口带回本场确认时限', RO.timeoutSec === 10);
+    // 每个「同毫秒分组」边界：从起点 replayUntil 与逐条顺序应用结果完全一致
+    let determinismOk = true;
+    const seqState = E.initialState(RO);
+    for (let i = 0; i < events.length; i++) {
+      E.applyEvent(seqState, events[i]);
+      const lastOfGroup = i === events.length - 1 ||
+        Date.parse(events[i + 1].ts) !== Date.parse(events[i].ts);
+      if (lastOfGroup) {
+        const jumped = E.replayUntil(events, Date.parse(events[i].ts), RO);
+        if (JSON.stringify(jumped) !== JSON.stringify(seqState)) determinismOk = false;
+      }
+    }
+    check('跳转（起点重放）与顺序播放状态在所有时刻一致', determinismOk);
+
+    let s = E.replayUntil(events, Date.parse('2031-01-01T00:00:02.000Z'), RO);
+    check('替岗重放：有效目标为 灯光/道具，音响失效',
+      JSON.stringify(E.effectiveTargets(s, s.currentCue)) === JSON.stringify(['灯光', '道具']));
+    s = E.replayUntil(events, Date.parse('2031-01-01T00:00:03.000Z'), RO);
+    check('替补确认计入确认表', !!s.confirmations['道具'] && s.revision === 1);
+    s = E.replayUntil(events, Date.parse('2031-01-01T00:00:10.000Z'), RO);
+    check('暂停状态重放：冻结余量、原因、倒计时不超时',
+      s.paused && s.phase === 'paused' && s.pauseReason === '设备调试' &&
+      s.remainingMs > 0 && E.deriveClock(s, Date.parse('2031-01-01T00:00:10.000Z')).timedOutNow === false);
+    s = E.replayUntil(events, Date.parse('2031-01-01T00:00:21.000Z'), RO);
+    check('修订重放：旧轮封存 recalled、当前为第 2 版新文本与新 attemptId',
+      s.attempts['1'].length === 1 && s.attempts['1'][0].endState === 'recalled' &&
+      s.revision === 2 && s.currentCue.text === '修订版口令' && s.attemptId === 'a2' &&
+      s.attempts['1'][0].substitutions['音响'] === '道具');
+    s = E.replayUntil(events, Date.parse('2031-01-01T00:00:22.000Z'), RO);
+    check('修订后新一轮状态已重置（旧替岗不串入，新轮替岗与确认生效）',
+      !s.attempts['1'][1] && Object.keys(s.confirmations).length === 1 &&
+      s.substitutions['音响'] === '道具' && !!s.confirmations['道具']);
+    s = E.replayUntil(events, Date.parse('2031-01-01T00:00:31.100Z'), RO);
+    check('超时标记重放', s.timedOut.includes('灯光') && !s.confirmations['灯光']);
+    s = E.replayUntil(events, Date.parse('2031-01-01T00:00:33.200Z'), RO);
+    check('终态：done，两轮封存（recalled + completed）且迟到标记保留',
+      s.phase === 'done' && s.currentCue === null &&
+      s.attempts['1'].length === 2 &&
+      s.attempts['1'][1].endState === 'completed' &&
+      s.attempts['1'][1].confirmations['灯光'].late === true);
+    // 重复跳转幂等：多次 seek 到同一时刻结果相同
+    const j1 = JSON.stringify(E.replayUntil(events, Date.parse('2031-01-01T00:00:31.500Z'), RO));
+    const j2 = JSON.stringify(E.replayUntil(events, Date.parse('2031-01-01T00:00:05.000Z'), RO));
+    const j3 = JSON.stringify(E.replayUntil(events, Date.parse('2031-01-01T00:00:31.500Z'), RO));
+    check('跳转幂等：先跳到后点、再跳前点、再跳回后点结果不变', j1 === j3 && j1 !== j2);
+  } finally {
+    // 复盘只读：测试夹具仅落盘在数据目录，用完即删，绝不影响当前演出日志
+    fs.existsSync(fixture) && fs.unlinkSync(fixture);
+    fs.existsSync(fixture2) && fs.unlinkSync(fixture2);
+  }
+  const listAfter = await httpGet('/api/replay/runs');
+  check('夹具清理后列表不再包含测试场次',
+    !listAfter.body.runs.some((r) => r.sessionId === FIX_SID || r.sessionId === FIX2_SID));
 
   console.log(`\n结果：${passed} 通过，${failed} 失败`);
   process.exit(failed ? 1 : 0);
